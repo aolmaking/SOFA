@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: Brew & Bake — Cart API
+  title: SOFA — Cart API
   version: "1.0"
   description: >
     API contract for the Cart slice (Member 2).

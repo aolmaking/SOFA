@@ -1,4 +1,4 @@
-# API Contracts — Brew & Bake Ordering System
+# API Contracts — SOFA Ordering System
 
 ## What Is an API Contract?
 
