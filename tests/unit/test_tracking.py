@@ -1,63 +1,87 @@
 import sys
 import os
 import unittest
+import json
+import sqlite3
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
-# Add backend to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../backend')))
-
+sys.path.insert(0, os.path.abspath('backend'))
 from app import app
-from tracking.routes import orders_db
 
-class TestTrackingRoutes(unittest.TestCase):
+class TrackingTestCase(unittest.TestCase):
     def setUp(self):
         self.app = app.test_client()
         self.app.testing = True
-        # Clear mock db before each test
-        orders_db.clear()
+        self.test_email = "track_test@example.com"
+        self.test_password = "Password123"
+        self.app.post('/api/auth/register', json={
+            "email": self.test_email,
+            "username": "track_test",
+            "password": self.test_password,
+            "full_name": "Track Test"
+        })
+        login = self.app.post('/api/auth/login', json={
+            "email": self.test_email,
+            "password": self.test_password
+        })
+        self.token = json.loads(login.data)['token']
 
-    def test_tracking_initial_status(self):
-        # First request initializes order with current time
-        response = self.app.get('/api/track/123')
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        
-        self.assertEqual(data['order_id'], '123')
-        self.assertEqual(data['status'], 'pending')
-        self.assertLess(data['elapsed_minutes'], 2)
+    def tearDown(self):
+        db_path = os.path.abspath('backend/Database.db')
+        conn = sqlite3.connect(db_path)
+        conn.execute("DELETE FROM customers WHERE email = ?", (self.test_email,))
+        conn.commit()
+        conn.close()
 
-    def test_tracking_brewing_status(self):
-        # Manually inject an order created 3 minutes ago
-        created_at = datetime.now() - timedelta(minutes=3)
-        orders_db['124'] = {'created_at': created_at}
-        
-        response = self.app.get('/api/track/124')
-        data = response.get_json()
-        
-        self.assertEqual(data['status'], 'brewing')
-        self.assertTrue(2 <= data['elapsed_minutes'] < 4)
+    def _auth_headers(self):
+        return {"Authorization": f"Bearer {self.token}"}
 
-    def test_tracking_delivering_status(self):
-        # Manually inject an order created 5 minutes ago
-        created_at = datetime.now() - timedelta(minutes=5)
-        orders_db['125'] = {'created_at': created_at}
-        
-        response = self.app.get('/api/track/125')
-        data = response.get_json()
-        
-        self.assertEqual(data['status'], 'delivering')
-        self.assertTrue(4 <= data['elapsed_minutes'] < 6)
+    def _place_order(self):
+        menu = self.app.get('/api/menu')
+        item_id = json.loads(menu.data)[0]['public_id']
+        self.app.post('/api/cart', json={"item_id": item_id, "quantity": 1})
+        res = self.app.post('/api/order',
+                            json={"customer_name": "Test"},
+                            headers=self._auth_headers())
+        return json.loads(res.data)['order_id']
 
-    def test_tracking_done_status(self):
-        # Manually inject an order created 7 minutes ago
-        created_at = datetime.now() - timedelta(minutes=7)
-        orders_db['126'] = {'created_at': created_at}
-        
-        response = self.app.get('/api/track/126')
-        data = response.get_json()
-        
-        self.assertEqual(data['status'], 'done')
-        self.assertGreaterEqual(data['elapsed_minutes'], 6)
+    def test_tracking_initial_pending(self):
+        order_id = self._place_order()
+        res = self.app.get('/api/track/active', headers=self._auth_headers())
+        data = json.loads(res.data)
+        self.assertEqual(res.status_code, 200)
+        order = [o for o in data['orders'] if o['order_id'] == order_id][0]
+        self.assertEqual(order['status'], 'pending')
 
-if __name__ == '__main__':
-    unittest.main()
+    @patch('backend.tracking.routes.datetime')
+    def test_tracking_preparing_after_3min(self, mock_dt):
+        order_id = self._place_order()
+        # Mock time to 3 minutes in the future
+        future = datetime.utcnow() + timedelta(minutes=3)
+        mock_dt.utcnow.return_value = future
+        res = self.app.get('/api/track/active', headers=self._auth_headers())
+        data = json.loads(res.data)
+        order = [o for o in data['orders'] if o['order_id'] == order_id][0]
+        self.assertEqual(order['status'], 'preparing')
+
+    @patch('backend.tracking.routes.datetime')
+    def test_tracking_ready_after_5min(self, mock_dt):
+        order_id = self._place_order()
+        future = datetime.utcnow() + timedelta(minutes=5)
+        mock_dt.utcnow.return_value = future
+        res = self.app.get('/api/track/active', headers=self._auth_headers())
+        data = json.loads(res.data)
+        order = [o for o in data['orders'] if o['order_id'] == order_id][0]
+        self.assertEqual(order['status'], 'ready')
+
+    @patch('backend.tracking.routes.datetime')
+    def test_tracking_completed_after_7min(self, mock_dt):
+        order_id = self._place_order()
+        future = datetime.utcnow() + timedelta(minutes=7)
+        mock_dt.utcnow.return_value = future
+        res = self.app.get('/api/track/history', headers=self._auth_headers())
+        data = json.loads(res.data)
+        order = [o for o in data['orders'] if o['order_id'] == order_id][0]
+        self.assertEqual(order['status'], 'completed')
+        self.assertEqual(len(order['timeline']), 4)
