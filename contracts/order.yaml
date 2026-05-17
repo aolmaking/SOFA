@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: Brew & Bake — Order Placement API
+  title: SOFA — Order Placement API
   version: "1.0"
   description: >
     API contract for the Order Placement slice (Member 3).

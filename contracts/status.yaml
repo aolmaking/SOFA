@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: Brew & Bake — Order Status Management API
+  title: SOFA — Order Status Management API
   version: "1.0"
   description: >
     API contract for the Order Status Management slice (Member 4).

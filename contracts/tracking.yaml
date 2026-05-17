@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: Brew & Bake — Order Tracking API
+  title: SOFA — Order Tracking API
   version: "1.0"
   description: >
     API contract for the Order Tracking slice (Member 5).
